@@ -7,3 +7,9 @@ decisions.jsonl
 __pycache__/
 *.pyc
 .venv/
+venv/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+.idea/
+.vscode/

@@ -1,18 +1,25 @@
 {
   "name": "crypto-desk",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "Multi-agent crypto trading desk skeleton (Solana + EVM) with hard risk controls",
   "private": true,
+  "main": "dist/index.js",
   "scripts": {
     "start": "ts-node src/index.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "@types/ws": "^8.5.0",
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.10",
     "ts-node": "^10.9.2",
-    "typescript": "^5.4.0"
+    "typescript": "^5.5.0"
   }
 }
