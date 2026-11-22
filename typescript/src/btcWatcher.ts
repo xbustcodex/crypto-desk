@@ -1,5 +1,7 @@
 import WebSocket from "ws";
 import { BTCPriceTick } from "./messages";
+import { logger } from "./utils/logger";
+import { config } from "./config";
 
 type TickHandler = (tick: BTCPriceTick) => void | Promise<void>;
 
@@ -39,74 +41,83 @@ class PriceCache {
   }
 }
 
-function reconnecting(name: string, connectFn: () => void) {
+function connectWithRetry(
+  name: string,
+  url: string,
+  onOpen: (ws: WebSocket) => void,
+  onMessage: (data: unknown) => void
+) {
   let delay = 1000;
-  const run = () => {
+  const connect = () => {
     try {
-      connectFn();
+      const ws = new WebSocket(url);
+      ws.on("open", () => {
+        delay = 1000;
+        logger.info("BTC", `${name} connected`);
+        onOpen(ws);
+      });
+      ws.on("message", (raw) => {
+        try {
+          onMessage(JSON.parse(raw.toString()));
+        } catch {
+          /* ignore */
+        }
+      });
+      ws.on("close", () => {
+        logger.warn("BTC", `${name} closed — retry in ${delay}ms`);
+        setTimeout(connect, delay);
+        delay = Math.min(delay * 2, 30_000);
+      });
+      ws.on("error", () => {
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+      });
     } catch (e) {
-      console.error(`[${name}] connect error`, e);
-      setTimeout(run, delay);
-      delay = Math.min(delay * 2, 30000);
+      logger.error("BTC", `${name} connect error`, e);
+      setTimeout(connect, delay);
+      delay = Math.min(delay * 2, 30_000);
     }
   };
-  run();
+  connect();
 }
 
-export function startBtcWatcher(onTick: TickHandler, intervalMs = 1000) {
+export function startBtcWatcher(
+  onTick: TickHandler,
+  intervalMs = config.btcIntervalMs
+) {
   const cache = new PriceCache();
 
-  // Binance
-  reconnecting("Binance", () => {
-    const ws = new WebSocket(BINANCE_WS);
-    ws.on("open", () => console.log("[Binance] connected"));
-    ws.on("message", (raw) => {
-      try {
-        const data = JSON.parse(raw.toString());
-        const price = parseFloat(data.c || data.lastPrice || "0");
-        if (price > 0) cache.update("binance", price);
-      } catch {
-        /* ignore parse errors */
-      }
-    });
-    ws.on("close", () =>
-      setTimeout(() => reconnecting("Binance", () => {}), 2000)
-    );
-    ws.on("error", () => ws.close());
-  });
+  connectWithRetry(
+    "Binance",
+    BINANCE_WS,
+    () => {},
+    (data: any) => {
+      const price = parseFloat(data.c || data.lastPrice || "0");
+      if (price > 0) cache.update("binance", price);
+    }
+  );
 
-  // Bybit
-  reconnecting("Bybit", () => {
-    const ws = new WebSocket(BYBIT_WS);
-    ws.on("open", () => {
-      console.log("[Bybit] connected");
+  connectWithRetry(
+    "Bybit",
+    BYBIT_WS,
+    (ws) => {
       ws.send(JSON.stringify({ op: "subscribe", args: ["tickers.BTCUSDT"] }));
-    });
-    ws.on("message", (raw) => {
-      try {
-        const data = JSON.parse(raw.toString());
-        if (
-          typeof data.topic === "string" &&
-          data.topic.startsWith("tickers")
-        ) {
-          const price = parseFloat(data.data?.lastPrice || "0");
-          if (price > 0) cache.update("bybit", price);
-        }
-      } catch {
-        /* ignore */
+    },
+    (data: any) => {
+      if (typeof data.topic === "string" && data.topic.startsWith("tickers")) {
+        const price = parseFloat(data.data?.lastPrice || "0");
+        if (price > 0) cache.update("bybit", price);
       }
-    });
-    ws.on("close", () =>
-      setTimeout(() => reconnecting("Bybit", () => {}), 2000)
-    );
-    ws.on("error", () => ws.close());
-  });
+    }
+  );
 
-  // Coinbase Advanced Trade (public ticker)
-  reconnecting("Coinbase", () => {
-    const ws = new WebSocket(COINBASE_WS);
-    ws.on("open", () => {
-      console.log("[Coinbase] connected");
+  connectWithRetry(
+    "Coinbase",
+    COINBASE_WS,
+    (ws) => {
       ws.send(
         JSON.stringify({
           type: "subscribe",
@@ -114,34 +125,30 @@ export function startBtcWatcher(onTick: TickHandler, intervalMs = 1000) {
           channel: "ticker",
         })
       );
-    });
-    ws.on("message", (raw) => {
-      try {
-        const data = JSON.parse(raw.toString());
-        if (data.channel === "ticker") {
-          for (const ev of data.events || []) {
-            for (const t of ev.tickers || []) {
-              if (t.product_id === "BTC-USD") {
-                const price = parseFloat(t.price || "0");
-                if (price > 0) cache.update("coinbase", price);
-              }
+    },
+    (data: any) => {
+      if (data.channel === "ticker") {
+        for (const ev of data.events || []) {
+          for (const t of ev.tickers || []) {
+            if (t.product_id === "BTC-USD") {
+              const price = parseFloat(t.price || "0");
+              if (price > 0) cache.update("coinbase", price);
             }
           }
         }
-      } catch {
-        /* ignore */
       }
-    });
-    ws.on("close", () =>
-      setTimeout(() => reconnecting("Coinbase", () => {}), 2000)
-    );
-    ws.on("error", () => ws.close());
-  });
+    }
+  );
 
   setInterval(async () => {
     const tick = cache.snapshot();
-    await onTick(tick);
+    try {
+      await onTick(tick);
+    } catch (e) {
+      logger.error("BTC", "onTick handler error", e);
+    }
   }, intervalMs);
 
+  logger.info("BTC", `watcher started interval=${intervalMs}ms`);
   return cache;
 }
