@@ -18,7 +18,6 @@ class EquitySnapshot:
 class Position:
     id: str
     size_usd: float
-    # minimal for tracking; extend as needed
 
 
 class EquityTracker:
@@ -33,7 +32,7 @@ class EquityTracker:
         self.source = source
 
     async def refresh_from_exchange(self) -> None:
-        """Override / implement: fetch CEX balances or on-chain SOL/USDC (read-only)."""
+        """Implement CEX or on-chain balance read (read-only)."""
         pass
 
     def on_position_opened(self, pos: Position) -> None:
