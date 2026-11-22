@@ -1,4 +1,4 @@
-"""Risk sizing + DeskManager with equity tracking."""
+"""Risk sizing + DeskManager with equity tracking (v0.2)."""
 from __future__ import annotations
 import json
 import time
@@ -33,8 +33,9 @@ class RiskAgent:
             return
 
         stop = float(prop.get("stop_pct", HARD_STOP))
-        if stop > HARD_STOP:  # looser than -6% → tighten
+        if stop > HARD_STOP:
             stop = HARD_STOP
+            notes.append(f"stop tightened to {HARD_STOP}")
 
         risked = {
             **prop,
