@@ -30,6 +30,7 @@ export interface RugReport {
   honeypot_risk?: boolean | null;
   details?: Record<string, unknown>;
   reason: string;
+  checked_at: number;
 }
 
 export interface TradeProposal {
@@ -70,4 +71,16 @@ export interface EquitySnapshot {
   availableUsd: number;
   openExposureUsd: number;
   source: string;
+}
+
+export interface WhaleSignal {
+  candidate: TokenCandidate;
+  score: number;
+  reason: string;
+}
+
+export interface HypeSignal {
+  candidate: TokenCandidate;
+  score: number;
+  reason: string;
 }
