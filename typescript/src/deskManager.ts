@@ -2,33 +2,30 @@ import { MessageBus } from "./bus";
 import { EquityTracker } from "./equity";
 import { TradeProposal, Decision, BTCPriceTick } from "./messages";
 import { MAX_EQUITY_PCT, MAX_SLIPPAGE } from "./risk";
+import { config } from "./config";
+import { logger } from "./utils/logger";
 import * as fs from "fs";
 
-/**
- * DeskManager – final authority.
- * - Approves / rejects after Risk
- * - Can halt on wide BTC spreads
- * - Append-only decision log
- * - Permanently blocks withdrawals
- */
 export class DeskManager {
   halted = false;
-  private maxBtcSpreadPct = 0.003; // 0.3%
+  private maxBtcSpreadPct = config.maxBtcSpreadPct;
+  private logPath = config.decisionLogPath;
 
   constructor(
     private bus: MessageBus,
-    private equity: EquityTracker,
-    private logPath = "decisions.jsonl"
+    private equity: EquityTracker
   ) {
     this.bus.subscribe<TradeProposal>("proposals_risked", (p) => this.onRisked(p));
     this.bus.subscribe<BTCPriceTick>("btc_ticks", (t) => this.onBtc(t));
+    logger.info("Desk", `ready log=${this.logPath} maxSpread=${this.maxBtcSpreadPct}`);
   }
 
   private async onBtc(tick: BTCPriceTick) {
     if (tick.spread_pct != null && tick.spread_pct > this.maxBtcSpreadPct) {
       if (!this.halted) {
-        console.warn(
-          `[Desk] halting new entries – BTC spread ${(tick.spread_pct * 100).toFixed(3)}%`
+        logger.warn(
+          "Desk",
+          `halting new entries – BTC spread ${(tick.spread_pct * 100).toFixed(3)}%`
         );
       }
       this.halted = true;
@@ -38,7 +35,7 @@ export class DeskManager {
       tick.spread_pct < this.maxBtcSpreadPct * 0.7
     ) {
       this.halted = false;
-      console.log("[Desk] resuming – BTC spread normalized");
+      logger.info("Desk", "resuming – BTC spread normalized");
     }
   }
 
@@ -66,7 +63,7 @@ export class DeskManager {
     }
 
     const reason = [
-      `Desk APPROVED`,
+      "Desk APPROVED",
       prop.reason,
       prop.risk_notes,
       `rug: ${prop.rug.reason}`,
@@ -95,18 +92,21 @@ export class DeskManager {
     this.appendLog(decision);
     if (approved) {
       await this.bus.publish("approved", decision);
+      logger.info("Desk", `APPROVE ${reason}`);
     } else {
       await this.bus.publish("rejected", decision);
+      logger.warn("Desk", `REJECT ${reason}`);
     }
-    console.log(`[Desk] ${approved ? "APPROVE" : "REJECT"} ${reason}`);
   }
 
   private appendLog(d: Decision) {
-    const line = JSON.stringify(d) + "\n";
-    fs.appendFileSync(this.logPath, line);
+    try {
+      fs.appendFileSync(this.logPath, JSON.stringify(d) + "\n");
+    } catch (e) {
+      logger.error("Desk", "failed to write decision log", e);
+    }
   }
 
-  /** Hard policy – call this from any code path that might try to withdraw. */
   neverWithdraw(): never {
     throw new Error(
       "Withdrawals are permanently disabled by DeskManager policy"
@@ -115,11 +115,11 @@ export class DeskManager {
 
   halt(reason = "manual") {
     this.halted = true;
-    console.warn(`[Desk] manual halt: ${reason}`);
+    logger.warn("Desk", `manual halt: ${reason}`);
   }
 
   resume() {
     this.halted = false;
-    console.log("[Desk] resumed");
+    logger.info("Desk", "resumed");
   }
 }

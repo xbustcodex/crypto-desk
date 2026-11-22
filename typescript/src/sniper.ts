@@ -2,6 +2,8 @@ import { MessageBus } from "./bus";
 import { EquityTracker } from "./equity";
 import { Decision, Position } from "./messages";
 import { MAX_SLIPPAGE } from "./risk";
+import { logger } from "./utils/logger";
+import { config } from "./config";
 
 export type BuyExecutor = (args: {
   candidate: Decision["proposal"]["candidate"];
@@ -20,6 +22,7 @@ export class SniperAgent {
     ) => Promise<number>
   ) {
     this.bus.subscribe<Decision>("approved", (d) => this.onApproved(d));
+    logger.info("Sniper", `ready paper=${config.paperMode}`);
   }
 
   private async onApproved(decision: Decision) {
@@ -38,7 +41,7 @@ export class SniperAgent {
         reason: decision.reason,
       });
 
-      const stopPrice = fill.price * (1 + prop.stop_pct); // stop_pct is negative
+      const stopPrice = fill.price * (1 + prop.stop_pct);
       const pos: Position = {
         id: fill.id,
         candidate: prop.candidate,
@@ -51,11 +54,12 @@ export class SniperAgent {
 
       this.equity.onPositionOpened(pos);
       await this.bus.publish("positions_opened", pos);
-      console.log(
-        `[Sniper] opened ${pos.id} @ ${pos.entry_price} | ${pos.reason}`
+      logger.info(
+        "Sniper",
+        `opened ${pos.id} @ ${pos.entry_price} size=${pos.size_usd}`
       );
     } catch (e) {
-      console.error(`[Sniper] execution failed`, e, decision.reason);
+      logger.error("Sniper", `execution failed: ${decision.reason}`, e);
     }
   }
 }
