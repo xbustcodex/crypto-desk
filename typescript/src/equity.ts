@@ -1,9 +1,9 @@
 import { EquitySnapshot, Position } from "./messages";
+import { logger } from "./utils/logger";
 
 /**
  * EquityTracker – single source of truth for sizing.
- * In production, refresh from exchange balances / on-chain wallet (read-only).
- * Never implements withdraw/transfer.
+ * Read-only: never implements withdraw/transfer.
  */
 export class EquityTracker {
   private totalEquityUsd: number;
@@ -14,11 +14,11 @@ export class EquityTracker {
   constructor(initialEquityUsd: number, source = "manual") {
     this.totalEquityUsd = initialEquityUsd;
     this.source = source;
+    logger.info("Equity", `initialized total=${initialEquityUsd} source=${source}`);
   }
 
-  /** Replace with real balance reader (CEX account or on-chain SOL/USDC). */
   async refreshFromExchange(): Promise<void> {
-    // TODO: call exchange balance API or RPC – read only
+    logger.debug("Equity", "refreshFromExchange not wired");
   }
 
   setTotalEquity(usd: number, source = "manual") {
@@ -29,6 +29,10 @@ export class EquityTracker {
   onPositionOpened(pos: Position) {
     this.positions.set(pos.id, pos);
     this.openExposureUsd += pos.size_usd;
+    logger.info(
+      "Equity",
+      `opened ${pos.id} size=${pos.size_usd} exposure=${this.openExposureUsd}`
+    );
   }
 
   onPositionClosed(posId: string) {
@@ -36,6 +40,7 @@ export class EquityTracker {
     if (!pos) return;
     this.openExposureUsd = Math.max(0, this.openExposureUsd - pos.size_usd);
     this.positions.delete(posId);
+    logger.info("Equity", `closed ${posId} exposure=${this.openExposureUsd}`);
   }
 
   getSnapshot(): EquitySnapshot {
@@ -54,5 +59,9 @@ export class EquityTracker {
 
   get available() {
     return Math.max(0, this.totalEquityUsd - this.openExposureUsd);
+  }
+
+  get openPositions() {
+    return [...this.positions.values()];
   }
 }

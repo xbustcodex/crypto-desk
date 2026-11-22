@@ -1,21 +1,23 @@
 import { MessageBus } from "./bus";
 import { EquityTracker } from "./equity";
 import { TradeProposal, Decision } from "./messages";
+import { config } from "./config";
+import { logger } from "./utils/logger";
 
-export const MAX_EQUITY_PCT = 0.4;
-export const MAX_SLIPPAGE = 0.02;
-export const HARD_STOP = -0.06;
+export const MAX_EQUITY_PCT = config.maxEquityPct;
+export const MAX_SLIPPAGE = config.maxSlippage;
+export const HARD_STOP = config.hardStop;
 
-/**
- * RiskAgent – sizes proposals and enforces hard limits.
- * Publishes to "proposals_risked" or "rejected".
- */
 export class RiskAgent {
   constructor(
     private bus: MessageBus,
     private equity: EquityTracker
   ) {
     this.bus.subscribe<TradeProposal>("proposals_raw", (p) => this.onProposal(p));
+    logger.info(
+      "Risk",
+      `limits equityPct=${MAX_EQUITY_PCT} slippage=${MAX_SLIPPAGE} hardStop=${HARD_STOP}`
+    );
   }
 
   private async onProposal(prop: TradeProposal) {
@@ -28,7 +30,7 @@ export class RiskAgent {
 
     if (prop.size_usd > maxSize) {
       notes.push(
-        `sized down from ${prop.size_usd} to ${maxSize.toFixed(2)} (40% equity cap)`
+        `sized down from ${prop.size_usd.toFixed(2)} to ${maxSize.toFixed(2)} (40% equity cap)`
       );
     }
     if (size > availableCap) {
@@ -47,9 +49,12 @@ export class RiskAgent {
       return;
     }
 
-    // Force stop at least as tight as HARD_STOP (−6%)
     const enforcedStop =
       prop.stop_pct > HARD_STOP ? HARD_STOP : prop.stop_pct;
+
+    if (prop.stop_pct > HARD_STOP) {
+      notes.push(`stop tightened from ${prop.stop_pct} to ${HARD_STOP}`);
+    }
 
     const risked: TradeProposal = {
       ...prop,
@@ -58,6 +63,10 @@ export class RiskAgent {
       risk_notes: notes.join("; ") || prop.risk_notes || "",
     };
 
+    logger.info(
+      "Risk",
+      `sized ${size.toFixed(2)} stop=${enforcedStop} for ${prop.candidate.address}`
+    );
     await this.bus.publish("proposals_risked", risked);
   }
 
@@ -70,6 +79,6 @@ export class RiskAgent {
       ts: Date.now() / 1000,
     };
     await this.bus.publish("rejected", decision);
-    console.log(`[Risk] REJECT ${reason}`);
+    logger.warn("Risk", `REJECT ${reason}`);
   }
 }
