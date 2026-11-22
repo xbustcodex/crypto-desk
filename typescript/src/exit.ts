@@ -2,6 +2,7 @@ import { MessageBus } from "./bus";
 import { EquityTracker } from "./equity";
 import { Position } from "./messages";
 import { HARD_STOP, MAX_SLIPPAGE } from "./risk";
+import { logger } from "./utils/logger";
 
 export type SellExecutor = (args: {
   position: Position;
@@ -21,6 +22,7 @@ export class ExitAgent {
   ) {
     this.bus.subscribe<Position>("positions_opened", (p) => {
       this.positions.set(p.id, p);
+      logger.info("Exit", `watching ${p.id} stop=${p.stop_price}`);
     });
     setInterval(() => this.tick(), pollMs);
   }
@@ -36,7 +38,7 @@ export class ExitAgent {
           await this.close(pos, price, reason);
         }
       } catch (e) {
-        console.error(`[Exit] monitor error ${id}`, e);
+        logger.error("Exit", `monitor error ${id}`, e);
       }
     }
   }
@@ -47,9 +49,9 @@ export class ExitAgent {
       await this.executeSell({ position: pos, limitPrice: limit, reason });
       this.positions.delete(pos.id);
       this.equity.onPositionClosed(pos.id);
-      console.log(`[Exit] closed ${pos.id} ~${price} | ${reason}`);
+      logger.info("Exit", `closed ${pos.id} ~${price} | ${reason}`);
     } catch (e) {
-      console.error(`[Exit] close failed ${pos.id}`, e);
+      logger.error("Exit", `close failed ${pos.id}`, e);
     }
   }
 }

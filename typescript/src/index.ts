@@ -5,17 +5,26 @@ import { DeskManager } from "./deskManager";
 import { SniperAgent } from "./sniper";
 import { ExitAgent } from "./exit";
 import { startBtcWatcher } from "./btcWatcher";
+import { ScannerAgent, RugAgent, WhaleAgent, HypeAgent } from "./agents";
 import { TradeProposal, TokenCandidate } from "./messages";
+import { config } from "./config";
+import { logger } from "./utils/logger";
 
 async function main() {
+  logger.info("Main", `starting crypto-desk v0.2 paper=${config.paperMode}`);
+
   const bus = new MessageBus();
-  const equity = new EquityTracker(10_000); // paper equity – replace with real reader
+  const equity = new EquityTracker(config.initialEquityUsd, "config");
 
   new RiskAgent(bus, equity);
   const desk = new DeskManager(bus, equity);
-  // desk.neverWithdraw(); // throws if ever called
 
-  // Dummy price + executors for skeleton demo
+  const scanner = new ScannerAgent(bus);
+  new RugAgent(bus);
+  new WhaleAgent(bus);
+  new HypeAgent(bus);
+  scanner.start();
+
   const getMid = async (_c: TokenCandidate) => 1.0;
   const executeBuy = async (args: {
     candidate: TokenCandidate;
@@ -23,15 +32,15 @@ async function main() {
     limitPrice: number;
     reason: string;
   }) => {
-    console.log("[PaperBuy]", args);
+    logger.info("PaperBuy", `${args.candidate.address} size=${args.sizeUsd} limit=${args.limitPrice}`);
     return { id: `pos-${Date.now()}`, price: args.limitPrice * 0.999 };
   };
   const executeSell = async (args: {
-    position: unknown;
+    position: { id: string };
     limitPrice: number;
     reason: string;
   }) => {
-    console.log("[PaperSell]", args);
+    logger.info("PaperSell", `${args.position.id} limit=${args.limitPrice} | ${args.reason}`);
   };
 
   new SniperAgent(bus, equity, executeBuy, getMid);
@@ -41,20 +50,23 @@ async function main() {
     await bus.publish("btc_ticks", tick);
   });
 
-  // Demo proposal after a short delay
   setTimeout(async () => {
     const candidate: TokenCandidate = {
       chain: "solana",
       address: "So11111111111111111111111111111111111111112",
+      symbol: "WSOL",
       source: "demo",
+      meta: { note: "demo — LP check will fail closed without pair lock data" },
     };
+    await scanner.emit(candidate);
+
     const proposal: TradeProposal = {
       candidate,
       side: "buy",
-      size_usd: 5000, // will be capped by 40% of 10k = 4000
+      size_usd: config.initialEquityUsd * 0.5,
       expected_slippage: 0.015,
-      stop_pct: -0.05, // will be tightened to -0.06
-      reason: "demo signal",
+      stop_pct: -0.05,
+      reason: "demo signal (pre-cleared rug for pipeline test)",
       rug: {
         chain: "solana",
         address: candidate.address,
@@ -62,13 +74,20 @@ async function main() {
         mint_authority_revoked: true,
         freeze_authority_disabled: true,
         lp_locked_or_burned: true,
+        lp_locked_pct: 1,
+        honeypot_risk: false,
         reason: "demo rug pass",
+        checked_at: Date.now() / 1000,
       },
     };
     await bus.publish("proposals_raw", proposal);
-  }, 3000);
+  }, 4000);
 
-  console.log("Desk running (paper). Ctrl+C to stop.");
+  void desk;
+  logger.info("Main", "desk running — Ctrl+C to stop");
 }
 
-main().catch(console.error);
+main().catch((e) => {
+  logger.error("Main", "fatal", e);
+  process.exit(1);
+});
